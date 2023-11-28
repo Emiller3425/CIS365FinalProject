@@ -22,8 +22,9 @@ from gymnasium import spaces
 import melee
 import numpy
 import os
+import itertools
 
-class custom_game(gymnasium.Env):
+class CustomGame(gymnasium.Env):
     def __init__(self):
         self.observation_space = spaces.Dict({
             # Not sure what max values for coordinates are so I arbitrarily chose 500.
@@ -42,23 +43,19 @@ class custom_game(gymnasium.Env):
         })
 
         # If this proves inefficient, do 9 stick positions.
-        self.action_space = spaces.Dict({
-            # Can make fewer positions if desired.
-            "stick_x": spaces.Discrete(5),
-            "stick_y": spaces.Discrete(5), 
-            # Only buttons that matter are A, B, Z, one of L/R, and no button pressed at all.
-            "buttons": spaces.Discrete(5)
-            # Every move can be represented by a combination of one of these stick positions and one of these button presses.
-        })
+        # Could be written as a Dict, but no model supports this. Writing as discrete instead.
+        self.action_space = spaces.Discrete(85)
 
         self.console: melee.Console = None
         self.controller: melee.Controller = None
         self.opponent_controller: melee.Controller = None
         self.current_state: melee.GameState = None
         self.init_run = 1
-        self.buttons = [melee.Button.BUTTON_B, melee.Button.BUTTON_A, melee.Button.BUTTON_Z, melee.Button.BUTTON_L, None]
-        self.stick_positions = [0, 0.25, 0.5, 0.75, 1]
-
+        buttons = [melee.Button.BUTTON_B, melee.Button.BUTTON_A, melee.Button.BUTTON_Z, melee.Button.BUTTON_L, None]
+        stick_positions = [(0.5,0.5), (0,0.5), (0,0), (0.5,0), (1,0), (1,0.5), (1,1), (0.5,1), (0,1),
+                                (0.25,0.5), (0.25,0.25), (0.5,0.25), (0.75,0.25), (0.75,0.5), (0.75,0.75), (0.5,0.75), (0.25,0.75)]
+        self.possible_moves = list(itertools.product(buttons, stick_positions))
+        
     def _get_obs(self, gamestate: melee.GameState):
         players = gamestate.players
 
@@ -77,9 +74,8 @@ class custom_game(gymnasium.Env):
         }
     
     def step(self, action):
-        self.controller.simple_press(self.stick_positions[action["stick_x"]],
-                                     self.stick_positions[action["stick_y"]],
-                                     self.buttons[action["buttons"]])
+        self._execute_action(action)
+
         gamestate = self.console.step()
 
         if gamestate.menu_state not in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
@@ -94,7 +90,11 @@ class custom_game(gymnasium.Env):
         
         # Update historical data.
         self.current_state = gamestate
-        return self._get_obs(), reward, done, info
+        return self._get_obs(gamestate), reward, done, info
+    
+    def _execute_action(self, action):
+        selected_move = self.possible_moves[action]
+        self.controller.simple_press(selected_move[1][0], selected_move[1][1], selected_move[0])
     
     def _calculate_reward(self, gamestate: melee.GameState):
         KNOCKOUT_REWARD = 1000
@@ -116,8 +116,10 @@ class custom_game(gymnasium.Env):
         if gamestate.players[1].off_stage:
             reward -= OFF_STAGE_PENALTY
 
+        return reward
+
     
-    def reset(self):
+    def reset(self, seed=None, options=None):
         # Windows-only code below, be warned. Since console.stop doesn't seem to work reliably. Don't want to
         # try killing the process on first go because it won't be active, but we do want this here to ensure we
         # don't run out of resources over a long training session.
