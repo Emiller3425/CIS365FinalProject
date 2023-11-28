@@ -18,14 +18,14 @@
 # come to that though if we can help it.
 
 import gymnasium
-import melee
 from gymnasium import spaces
+import melee
 import numpy
 import os
 
 class custom_game(gymnasium.Env):
-    def __init__(self, console: melee.Console):
-        self.observation_space = spaces.Dict(
+    def __init__(self):
+        self.observation_space = spaces.Dict({
             # Not sure what max values for coordinates are so I arbitrarily chose 500.
             "agent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
             "opponent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
@@ -37,23 +37,29 @@ class custom_game(gymnasium.Env):
             "agent_percent": spaces.Box(low = 0, high = 999, shape=(1,), dtype=numpy.int32),
             "opponent_percent": spaces.Box(low = 0, high = 999, shape=(1,), dtype=numpy.int32),
             "agent_action_frame": spaces.Box(low=0, high=250, shape=(1,), dtype=numpy.int32),
-            "opponent_action_frame": spaces.Box(low=0, high=250, shape=(1,), dtype=numpy.int32)
-        )
+            "opponent_action_frame": spaces.Box(low=0, high=250, shape=(1,), dtype=numpy.int32),
+            "agent_off_stage": spaces.Discrete(2)
+        })
 
         # If this proves inefficient, do 9 stick positions.
-        self.action_space = spaces.Dict(
-            # Center position, as well as any full tilt in the eight main directions or half tilt in the eight main directions.
-            "stick_position": spaces.Discrete(17),
+        self.action_space = spaces.Dict({
+            # Can make fewer positions if desired.
+            "stick_x": spaces.Discrete(5),
+            "stick_y": spaces.Discrete(5), 
             # Only buttons that matter are A, B, Z, one of L/R, and no button pressed at all.
             "buttons": spaces.Discrete(5)
             # Every move can be represented by a combination of one of these stick positions and one of these button presses.
-        )
+        })
 
-        self.console = console
-
+        self.console: melee.Console = None
+        self.controller: melee.Controller = None
+        self.opponent_controller: melee.Controller = None
+        self.current_state: melee.GameState = None
         self.init_run = 1
+        self.buttons = [melee.Button.BUTTON_B, melee.Button.BUTTON_A, melee.Button.BUTTON_Z, melee.Button.BUTTON_L, None]
+        self.stick_positions = [0, 0.25, 0.5, 0.75, 1]
 
-    def _get_obs(self, gamestate):
+    def _get_obs(self, gamestate: melee.GameState):
         players = gamestate.players
 
         return {
@@ -66,16 +72,55 @@ class custom_game(gymnasium.Env):
             "agent_percent": numpy.array([players[1].percent], dtype=numpy.int32),
             "opponent_percent": numpy.array([players[2].percent], dtype=numpy.int32),
             "agent_action_frame": numpy.array([players[1].action_frame], dtype=numpy.int32),
-            "opponent_action_frame": numpy.array([players[2].action_frame], dtype=numpy.int32)
+            "opponent_action_frame": numpy.array([players[2].action_frame], dtype=numpy.int32),
+            "agent_off_stage": players[1].off_stage
         }
     
     def step(self, action):
-        self.console.step()
-        # Figure this out later.
+        self.controller.simple_press(self.stick_positions[action["stick_x"]],
+                                     self.stick_positions[action["stick_y"]],
+                                     self.buttons[action["buttons"]])
+        gamestate = self.console.step()
+
+        if gamestate.menu_state not in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
+            done = True
+        else:
+            done = False
+
+        reward = self._calculate_reward(gamestate)
+
+        # Not sure what to do with this yet.
+        info = {}
+        
+        # Update historical data.
+        self.current_state = gamestate
         return self._get_obs(), reward, done, info
     
+    def _calculate_reward(self, gamestate: melee.GameState):
+        KNOCKOUT_REWARD = 1000
+        OFF_STAGE_PENALTY = 10
+        
+        # Reward if action has caused KO to opponent
+        reward = KNOCKOUT_REWARD * (self.current_state.players[2].stock - gamestate.players[2].stock)
+        # Penalize if action has caused damage to us
+        reward -= KNOCKOUT_REWARD * (self.current_state.players[1].stock - gamestate.players[1].stock)
+
+        # If we just KO'd, then the previous state will have higher percent than the current state (0%). Don't mess with that.
+        if reward == 0:
+            # Reward if action has caused damage to opponent
+            reward += gamestate.players[2].percent - self.current_state.players[2].percent
+            # Penalize if action has caused damage to us
+            reward -= gamestate.players[1].percent - self.current_state.players[1].percent
+
+        # Penalize if off the stage
+        if gamestate.players[1].off_stage:
+            reward -= OFF_STAGE_PENALTY
+
+    
     def reset(self):
-        # Windows-only code below, be warned. Since console.stop doesn't seem to work reliably.
+        # Windows-only code below, be warned. Since console.stop doesn't seem to work reliably. Don't want to
+        # try killing the process on first go because it won't be active, but we do want this here to ensure we
+        # don't run out of resources over a long training session.
         if self.init_run == 1:
             self.init_run = 0
         else:
@@ -84,41 +129,38 @@ class custom_game(gymnasium.Env):
 
         # More Windows-only code, swap out filepaths where needed.
         homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
-        console = melee.Console(path=homeDirectory+"\\AppData\\Roaming\\Slippi Launcher\\netplay", slippi_address="127.0.0.1")
+        self.console = melee.Console(path=homeDirectory+"\\AppData\\Roaming\\Slippi Launcher\\netplay", slippi_address="127.0.0.1")
 
         # Bot controller config, configure human controller within Dolphin under port 2.
-        controller = melee.Controller(console=console, port=1)
+        self.controller = melee.Controller(console=self.console, port=1)
         # Selects an in-game bot to play against.
-        opponentController = melee.Controller(console=console, port=2)
+        self.opponent_controller = melee.Controller(console=self.console, port=2)
 
         # Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
-        console.run("./ssb.nkit.iso")
-        console.connect()
-        self.console = console
+        self.console.run("./ssb.nkit.iso")
+        self.console.connect()
 
         # Connect virtual controller.
-        controller.connect()
-        opponentController.connect()
+        self.controller.connect()
+        self.opponent_controller.connect()
 
         while True:
-            gamestate = self.console.step()
-            if gamestate.menu_state in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
-                return self._get_obs(gamestate)
+            self.current_state = self.console.step()
+            if self.current_state.menu_state in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
+                return self._get_obs(self.current_state)
             else:
                 # Navigate menus.
                 melee.MenuHelper.choose_character(melee.Character.FOX,
-                    gamestate,
-                    opponentController,
-                    cpu_level=3,
+                    self.current_state,
+                    self.opponent_controller,
+                    cpu_level=9,
                     costume=0,
                     swag=False)
-                melee.MenuHelper.menu_helper_simple(gamestate,
-                    controller,
+                melee.MenuHelper.menu_helper_simple(self.current_state,
+                    self.controller,
                     melee.Character.JIGGLYPUFF,
                     melee.Stage.BATTLEFIELD,
-                    melee.gamestate.port_detector(gamestate, melee.Character.JIGGLYPUFF, 0),
+                    melee.gamestate.port_detector(self.current_state, melee.Character.JIGGLYPUFF, 0),
                     costume=0,
                     autostart=True,
                     swag=False)
-
-        
