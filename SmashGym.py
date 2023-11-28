@@ -26,8 +26,10 @@ import os
 class custom_game(gymnasium.Env):
     def __init__(self, console: melee.Console):
         self.observation_space = spaces.Dict(
+            # Not sure what max values for coordinates are so I arbitrarily chose 500.
             "agent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
             "opponent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
+            # This is the length of the action enum list. Possible we could work with a smaller space for any given character.
             "agent_action": spaces.Discrete(401),
             "opponent_action": spaces.Discrete(401),
             "agent_facing": spaces.Discrete(2),
@@ -40,8 +42,11 @@ class custom_game(gymnasium.Env):
 
         # If this proves inefficient, do 9 stick positions.
         self.action_space = spaces.Dict(
+            # Center position, as well as any full tilt in the eight main directions or half tilt in the eight main directions.
             "stick_position": spaces.Discrete(17),
+            # Only buttons that matter are A, B, Z, one of L/R, and no button pressed at all.
             "buttons": spaces.Discrete(5)
+            # Every move can be represented by a combination of one of these stick positions and one of these button presses.
         )
 
         self.console = console
