@@ -123,6 +123,9 @@ class CustomGame(gymnasium.Env):
         # Windows-only code below, be warned. Since console.stop doesn't seem to work reliably. Don't want to
         # try killing the process on first go because it won't be active, but we do want this here to ensure we
         # don't run out of resources over a long training session.
+        #
+        # This doesn't seem to be working! Going to have to solve this problem because if we don't, a long training
+        # session will just exhaust the computer of memory.
         if self.init_run == 1:
             self.init_run = 0
         else:
