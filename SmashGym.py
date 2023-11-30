@@ -23,6 +23,9 @@ import melee
 import numpy
 import os
 import itertools
+import psutil
+from Stop import stop
+import pdb
 
 class CustomGame(gymnasium.Env):
     def __init__(self):
@@ -62,8 +65,8 @@ class CustomGame(gymnasium.Env):
         return {
             "agent_coords": numpy.array([players[1].x, players[1].y], dtype=numpy.float32),
             "opponent_coords": numpy.array([players[2].x, players[2].y], dtype=numpy.float32),
-            "agent_action": players[1].action,
-            "opponent_action": players[2].action,
+            "agent_action": players[1].action.value,
+            "opponent_action": players[2].action.value,
             "agent_facing": players[1].facing,
             "opponent_facing": players[2].facing,
             "agent_percent": numpy.array([players[1].percent], dtype=numpy.int32),
@@ -90,7 +93,7 @@ class CustomGame(gymnasium.Env):
         
         # Update historical data.
         self.current_state = gamestate
-        return self._get_obs(gamestate), reward, done, info
+        return self._get_obs(gamestate), reward, done, False, info
     
     def _execute_action(self, action):
         selected_move = self.possible_moves[action]
@@ -120,17 +123,8 @@ class CustomGame(gymnasium.Env):
 
     
     def reset(self, seed=None, options=None):
-        # Windows-only code below, be warned. Since console.stop doesn't seem to work reliably. Don't want to
-        # try killing the process on first go because it won't be active, but we do want this here to ensure we
-        # don't run out of resources over a long training session.
-        #
-        # This doesn't seem to be working! Going to have to solve this problem because if we don't, a long training
-        # session will just exhaust the computer of memory.
-        if self.init_run == 1:
-            self.init_run = 0
-        else:
-            os.system("taskkill /im \"Slippi Dolphin.exe\"")
-            os.system("taskkill /im \"Slippi Dolphin.exe\"")
+        if self.console:
+            stop(self.console)
 
         # More Windows-only code, swap out filepaths where needed.
         homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
@@ -152,7 +146,7 @@ class CustomGame(gymnasium.Env):
         while True:
             self.current_state = self.console.step()
             if self.current_state.menu_state in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
-                return self._get_obs(self.current_state)
+                return (self._get_obs(self.current_state), {})
             else:
                 # Navigate menus.
                 melee.MenuHelper.choose_character(melee.Character.FOX,
