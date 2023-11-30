@@ -4,6 +4,10 @@ import sys
 import melee
 import random
 import os
+import time
+import psutil
+from Stop import stop
+
 
 # Assuming you're running this under Windows. Didn't want to have a CLI argument every time.
 homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
@@ -19,16 +23,15 @@ opponentController = melee.Controller(console=console, port=2)
 # Theoretically, you should just be able to call console.stop() to kill the Dolphin instance.
 # This doesn't seem to work. The implementation below definitely does but I'm leaving it commented
 # out because it's Windows-specific code.
-"""def close(sig, frame):
-    os.system("taskkill /im \"Slippi Dolphin.exe\"")
-    os.system("taskkill /im \"Slippi Dolphin.exe\"")
+def close(sig, frame):
+    stop(console)
     sys.exit(0)
 
-signal.signal(signal.SIGINT, close)"""
+signal.signal(signal.SIGINT, close)
 
 # Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
 # Rename the iso to match. If it's not a .nkit I don't think it really matters, just rename it anyways.
-console.run("./ssb.nkit.iso")
+console.run("./ssb.nkit.iso", environment_vars={"/b": "true"})
 console.connect()
 
 # Connect virtual controller.
