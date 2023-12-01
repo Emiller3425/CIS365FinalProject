@@ -170,6 +170,8 @@ for replay in os.listdir(input_path):
     controller_ports = list(gamestate.players.keys())
     # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
     filename = f"{replay_num}-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
+    # For directory, the stagenum
+    stagename = gamestate.stage.value
     # Arrays in which to store the data:
     x_set = []
     y0_set = []
@@ -192,6 +194,6 @@ for replay in os.listdir(input_path):
     y0_arr = numpy.array(y0_set)
     y1_arr = numpy.array(y1_set)
 
-    numpy.save(f"{output_path}{filename}x", x_arr)
-    numpy.save(f"{output_path}{filename}y0", y0_arr)
-    numpy.save(f"{output_path}{filename}y1", y1_arr)
+    numpy.save(f"{output_path}{stagename}\\{filename}x", x_arr)
+    numpy.save(f"{output_path}{stagename}\\{filename}y0", y0_arr)
+    numpy.save(f"{output_path}{stagename}\\{filename}y1", y1_arr)
