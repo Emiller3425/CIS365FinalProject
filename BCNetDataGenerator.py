@@ -58,6 +58,16 @@ import os
 import sys
 import melee
 import numpy
+import time
+# Thank you, ChatGPT, for these suggestions:
+from concurrent.futures import ThreadPoolExecutor
+from tqdm import tqdm
+
+def save_files(filename, stagename, output_path, x_arr, y0_arr, y1_arr):
+    numpy.save(f"{output_path}{stagename}\\{filename}x", x_arr)
+    numpy.save(f"{output_path}{stagename}\\{filename}y0", y0_arr)
+    numpy.save(f"{output_path}{stagename}\\{filename}y1", y1_arr)
+
 
 def store_data(gamestate: melee.GameState, controller_ports: list):
     """This function probably should've been in its own file, but we've already started, so... oops."""
@@ -146,54 +156,56 @@ def store_data(gamestate: melee.GameState, controller_ports: list):
 
     return x, y0, y1
 
-input_path = "D:\\smashdataset\\smashdataset\\"#
+input_path = "D:\\smashdataset\\smashdataset\\"
 output_path = "D:\\smashdataset\\parseddata\\"
-# Unimportant for data, but we can't have identically named files.
-replay_num = 0
 
-for replay in os.listdir(input_path):
-    # Increment filenum
-    replay_num += 1
-    # Load the file in.
-    console = melee.Console(path=input_path+replay, system="file", allow_old_version=True)
-    console.connect()
+files = os.listdir(input_path)
 
-    gamestate = console.step()
-    # Ensure the game is valid, I do *not* want this crashing on me.
-    if gamestate is None:
-        continue
-    # Ensure the data is valid as well.
-    if len(gamestate.players) != 2:
-        continue
-
-    # Game data is good, now figure out player port numbers to read Y state data from.
-    controller_ports = list(gamestate.players.keys())
-    # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
-    filename = f"{replay_num}-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
-    # For directory, the stagenum
-    stagename = gamestate.stage.value
-    # Arrays in which to store the data:
-    x_set = []
-    y0_set = []
-    y1_set = []
-    
-    while gamestate is not None:
-
-        # Store the data:
-        x_data, y0_data, y1_data = store_data(gamestate, controller_ports)
-        # Append to global set:
-        x_set.append(x_data)
-        y0_set.append(y0_data)
-        y1_set.append(y1_data)
-
-        # Increment the gamestate
-        gamestate = console.step()
-    
-    # Save the data:
-    x_arr = numpy.array(x_set)
-    y0_arr = numpy.array(y0_set)
-    y1_arr = numpy.array(y1_set)
-
-    numpy.save(f"{output_path}{stagename}\\{filename}x", x_arr)
+def save_files(filename, stagename, output_path, x_arr, y0_arr, y1_arr):
+    numpy.save(f"{output_path}{stagename}\\{time.time_ns()}{filename}x", x_arr)
     numpy.save(f"{output_path}{stagename}\\{filename}y0", y0_arr)
     numpy.save(f"{output_path}{stagename}\\{filename}y1", y1_arr)
+
+with ThreadPoolExecutor(max_workers=8) as executor:
+    futures = []
+    for file in tqdm(files):
+        # Load the file in.
+        console = melee.Console(path=input_path+file, system="file", allow_old_version=True)
+        console.connect()
+
+        gamestate = console.step()
+        # Ensure the game is valid, I do *not* want this crashing on me.
+        if gamestate is None:
+            continue
+        # Ensure the data is valid as well.
+        if len(gamestate.players) != 2:
+            continue
+
+        # Game data is good, now figure out player port numbers to read Y state data from.
+        controller_ports = list(gamestate.players.keys())
+        # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
+        filename = f"-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
+        # For directory, the stagenum
+        stagename = gamestate.stage.value
+        # Arrays in which to store the data:
+        x_set = []
+        y0_set = []
+        y1_set = []
+        
+        while gamestate is not None:
+
+            # Store the data:
+            x_data, y0_data, y1_data = store_data(gamestate, controller_ports)
+            # Append to global set:
+            x_set.append(x_data)
+            y0_set.append(y0_data)
+            y1_set.append(y1_data)
+
+            # Increment the gamestate
+            gamestate = console.step()
+        
+        # Save the data:
+        future = executor.submit(save_files)
+        futures.append(future)
+    for future in tqdm(futures):
+        future.result()
