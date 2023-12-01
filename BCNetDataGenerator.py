@@ -168,12 +168,19 @@ for replay in tqdm(os.listdir(input_path)):
     if len(gamestate.players) != 2:
         continue
 
+    # This is going to take a lot of time to run through, so we're only going to train two characters.
+    p1 = gamestate.players[controller_ports[0]].character
+    p2 = gamestate.players[controller_ports[1]].character
+    if p1 != melee.Character.FOX and p2 != melee.Character.FOX and p1 != melee.Character.JIGGLYPUFF and p2 != melee.Character.JIGGLYPUFF:
+        continue
+
     # Game data is good, now figure out player port numbers to read Y state data from.
     controller_ports = list(gamestate.players.keys())
     # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
     filename = f"{replay_num}-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
     # For directory, the stagenum
     stagename = gamestate.stage.value
+
     # Arrays in which to store the data:
     x_set = []
     y0_set = []
