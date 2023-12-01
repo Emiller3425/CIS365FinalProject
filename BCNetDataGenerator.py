@@ -59,7 +59,6 @@ import sys
 import melee
 import numpy
 
-
 def store_data(gamestate: melee.GameState, controller_ports: list):
     """This function probably should've been in its own file, but we've already started, so... oops."""
     x = []
@@ -80,9 +79,9 @@ def store_data(gamestate: melee.GameState, controller_ports: list):
     # P2 Percent
     x.append(gamestate.players[controller_ports[1]].percent/999)
     # P1 Action
-    x.append(gamestate.players[controller_ports[0]].action/397)
+    x.append(gamestate.players[controller_ports[0]].action.value/397)
     # P2 Action
-    x.append(gamestate.players[controller_ports[1]].action/397)
+    x.append(gamestate.players[controller_ports[1]].action.value/397)
     # P1 Action Frame
     x.append(gamestate.players[controller_ports[0]].action_frame/250)
     # P2 Action Frame
