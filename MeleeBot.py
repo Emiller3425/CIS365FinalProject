@@ -14,10 +14,9 @@ homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
 # Emulator config.
 console = melee.Console(path=homeDirectory+"\\AppData\\Roaming\\Slippi Launcher\\netplay", slippi_address="127.0.0.1")
 # Bot controller config.
-controller = melee.Controller(console=console,
-                              port=1)
-# Selects an in-game bot to play against. If you want to play the bot yourself, remove anything using this opponentController
-# and instead manually configure player 2's controls in Dolphin.
+controller = melee.Controller(console=console, port=1)
+# There are bugs that may prevent this from selecting a CPU player. I have figured these out but I
+# can't push them rn. Sorry.
 opponentController = melee.Controller(console=console, port=2)
 
 # Theoretically, you should just be able to call console.stop() to kill the Dolphin instance.
@@ -31,7 +30,7 @@ signal.signal(signal.SIGINT, close)
 
 # Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
 # Rename the iso to match. If it's not a .nkit I don't think it really matters, just rename it anyways.
-console.run("./ssb.nkit.iso", environment_vars={"/b": "true"})
+console.run("./ssb.iso")
 console.connect()
 
 # Connect virtual controller.
@@ -56,7 +55,7 @@ while True:
                 controller.press_button(melee.Button.BUTTON_X)
             else:
                 controller.release_button(melee.Button.BUTTON_X)
-    
+
     else:
         # Navigate menus.
         melee.MenuHelper.choose_character(melee.Character.FOX,

@@ -12,21 +12,16 @@ from stable_baselines3 import PPO
 import os
 
 model_directory = "models"
-log_directory = "logs"
 
 if not os.path.exists(model_directory):
     os.makedirs(model_directory)
 
-if not os.path.exists(log_directory):
-    os.makedirs(log_directory)
-
-
 env = CustomGame()
 env.reset()
 
-model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log=log_directory)
-for i in range(1,30):
-    model.learn(total_timesteps=100000, reset_num_timesteps=False, tb_log_name="TestModel")
+model = PPO("MultiInputPolicy", env, verbose=1)
+for i in range(1,120):
+    model.learn(total_timesteps=100000)
     model.save(f"{model_directory}/TestModel/{100000*i}")
 
 episodes = 10

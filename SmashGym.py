@@ -25,7 +25,7 @@ import os
 import itertools
 import psutil
 from Stop import stop
-import pdb
+import time
 
 class CustomGame(gymnasium.Env):
     def __init__(self):
@@ -33,7 +33,8 @@ class CustomGame(gymnasium.Env):
             # Not sure what max values for coordinates are so I arbitrarily chose 500.
             "agent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
             "opponent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
-            # This is the length of the action enum list. Possible we could work with a smaller space for any given character.
+            # 401 is the length of the action enum list. Possible we could work with a smaller space for any given character.
+            # Since I'm anticipating using Fox v. Jigglypuff, I took out some actions that I don't think will be used.
             "agent_action": spaces.Discrete(401),
             "opponent_action": spaces.Discrete(401),
             "agent_facing": spaces.Discrete(2),
@@ -125,6 +126,7 @@ class CustomGame(gymnasium.Env):
     def reset(self, seed=None, options=None):
         if self.console:
             stop(self.console)
+            time.sleep(1)
 
         # More Windows-only code, swap out filepaths where needed.
         homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
@@ -136,7 +138,8 @@ class CustomGame(gymnasium.Env):
         self.opponent_controller = melee.Controller(console=self.console, port=2)
 
         # Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
-        self.console.run("./ssb.nkit.iso")
+        self.console.run("./ssb.iso", environment_vars={"/b": "true"})
+        time.sleep(3)
         self.console.connect()
 
         # Connect virtual controller.

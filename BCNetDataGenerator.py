@@ -7,7 +7,7 @@
 # Data set used comes from an outline of a similar project, which you can find here:
 # https://bycn.github.io/2022/08/19/project-nabla.html
 #
-# Includes 94484 high-level games.
+# Includes 94484 high-level games. We only got through ~79% of them, or ~74240 of them.
 #
 # Notes:
 #    - Ensure everything is normalized to a numeric value between 0 and 1.
@@ -156,6 +156,8 @@ replay_num = 0
 for replay in tqdm(os.listdir(input_path)):
     # Increment filenum
     replay_num += 1
+    if replay_num < 42017:
+        continue
     # Load the file in.
     console = melee.Console(path=input_path+replay, system="file", allow_old_version=True)
     console.connect()
@@ -168,14 +170,15 @@ for replay in tqdm(os.listdir(input_path)):
     if len(gamestate.players) != 2:
         continue
 
+    # Game data is good, now figure out player port numbers to read Y state data from.
+    controller_ports = list(gamestate.players.keys())
+
     # This is going to take a lot of time to run through, so we're only going to train two characters.
     p1 = gamestate.players[controller_ports[0]].character
     p2 = gamestate.players[controller_ports[1]].character
     if p1 != melee.Character.FOX and p2 != melee.Character.FOX and p1 != melee.Character.JIGGLYPUFF and p2 != melee.Character.JIGGLYPUFF:
         continue
 
-    # Game data is good, now figure out player port numbers to read Y state data from.
-    controller_ports = list(gamestate.players.keys())
     # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
     filename = f"{replay_num}-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
     # For directory, the stagenum
