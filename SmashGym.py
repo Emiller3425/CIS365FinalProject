@@ -1,21 +1,11 @@
-# Trying to think through a potential deep learning solution, using some references:
+# Some of the references used to figure this part out:
 # https://towardsdatascience.com/how-to-train-an-ai-to-play-any-game-f1489f3bc5c
 # https://gymnasium.farama.org/tutorials/gymnasium_basics/environment_creation/#sphx-glr-tutorials-gymnasium-basics-environment-creation-py
-# https://web.stanford.edu/class/aa228/reports/2018/final112.pdf
+# https://youtu.be/uKnjGn8fF70?si=PiV9WYX9FGrgrSDP
 #
-# Very possible we don't have time for this, and I'm struggling to work my way through all this. Another alternative is an
-# observation-based solution. I have 200+gb of Slippi replays downloaded if someone can find a good way to make that work. For
-# some references, this video has stuff in the description I was trying to build off of but I got a bit lost there as well, mostly
-# because I don't know the game well enough:
-# https://www.youtube.com/watch?v=XmNQOSGcrUE
-# Related but not from the same guy, where I got the replays from: https://bycn.github.io/2022/08/19/project-nabla-writeup.html
-#
-# If you get to a point where you're ready to train this thing, just let me know and I can do it. If you use PyTorch or some other
-# library that can be GPU accelerated, I have a *lot* of compute I can throw at this. We'll be limited by the real-time speed limits
-# of emulation though, of course.
-#
-# Worst case scenario we can hand-code a decision tree, but there has to be some sort of "training" per our proposal. I'd rather it not
-# come to that though if we can help it.
+# This is our custom Gymnasium environment, which defines the environment for the Melee task and how the training algorithm should handle
+# cleanup tasks.
+
 
 import gymnasium
 from gymnasium import spaces
@@ -23,46 +13,65 @@ import melee
 import numpy
 import os
 import itertools
-import psutil
 from Stop import stop
 import time
 
 class CustomGame(gymnasium.Env):
     def __init__(self):
+        # Defines the Melee game state. This is the minimum amount of observations that I feel it would be possible for an agent
+        # to learn to play the game from. Inferences based on these factors should be able to fill in any gaps we've left.
         self.observation_space = spaces.Dict({
-            # Not sure what max values for coordinates are so I arbitrarily chose 500.
+            # Not sure what max values for coordinates are so I arbitrarily chose 500. I've not seen anything higher/lower than this
+            # in a few example games I've run, so this should be safe.
+            #
+            # Box space gives a continuous range of possible values, and the shape means it's two dimensional for both X and Y coords.
             "agent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
             "opponent_coords": spaces.Box(low = -500, high = 500, shape=(2,), dtype=numpy.float32),
-            # 401 is the length of the action enum list. Possible we could work with a smaller space for any given character.
-            # Since I'm anticipating using Fox v. Jigglypuff, I took out some actions that I don't think will be used.
+            # 401 is the length of the action enum list. It's possible we could work with a smaller action space given a fixed
+            # number of characters, but it would be very hard to map which actions are possible with which characters, so I'm
+            # leaving this at 401.
+            #
+            # Discrete means that there are 401 possibilities rather than a continuous space like with the Box.
             "agent_action": spaces.Discrete(401),
             "opponent_action": spaces.Discrete(401),
+            # Players can be facing in two different directions, either left or right.
             "agent_facing": spaces.Discrete(2),
             "opponent_facing": spaces.Discrete(2),
+            # Percent is only an integer on the screen, it's handled as a floating point value behind the scenes, between 0-999,
+            # hence the use of a Box space.
             "agent_percent": spaces.Box(low = 0, high = 999, shape=(1,), dtype=numpy.int32),
             "opponent_percent": spaces.Box(low = 0, high = 999, shape=(1,), dtype=numpy.int32),
+            # The most frames an action can take is 250. Most won't take that long at all, but we have to cover that space just in case.
+            # I'm not totally sure why this errors out when it's discrete and not continuous considering that it should be returning int
+            # values, but I suppose it doesn't hurt to leave it like this.
             "agent_action_frame": spaces.Box(low=0, high=250, shape=(1,), dtype=numpy.int32),
             "opponent_action_frame": spaces.Box(low=0, high=250, shape=(1,), dtype=numpy.int32),
+            # A character is either off or on stage.
             "agent_off_stage": spaces.Discrete(2)
         })
 
-        # If this proves inefficient, do 9 stick positions.
-        # Could be written as a Dict, but no model supports this. Writing as discrete instead.
+        # Each move consists of one stick position and one button press. Among stick positions and button presses, we also include a "None"
+        # button press for no attack and a "0.5,0.5" stick position for centered, no movement.
         self.action_space = spaces.Discrete(85)
 
+        # Hold LibMelee required values.
         self.console: melee.Console = None
         self.controller: melee.Controller = None
         self.opponent_controller: melee.Controller = None
         self.current_state: melee.GameState = None
-        self.init_run = 1
+
+        # Generate list of possible moves from which to select.
         buttons = [melee.Button.BUTTON_B, melee.Button.BUTTON_A, melee.Button.BUTTON_Z, melee.Button.BUTTON_L, None]
         stick_positions = [(0.5,0.5), (0,0.5), (0,0), (0.5,0), (1,0), (1,0.5), (1,1), (0.5,1), (0,1),
                                 (0.25,0.5), (0.25,0.25), (0.5,0.25), (0.75,0.25), (0.75,0.5), (0.75,0.75), (0.5,0.75), (0.25,0.75)]
+        
+        # Each number in the action space will translate to one index in this array, which contains all of the possible movement combinations.
         self.possible_moves = list(itertools.product(buttons, stick_positions))
         
     def _get_obs(self, gamestate: melee.GameState):
         players = gamestate.players
 
+        # Returns all the game state data in the form of the observation space.
         return {
             "agent_coords": numpy.array([players[1].x, players[1].y], dtype=numpy.float32),
             "opponent_coords": numpy.array([players[2].x, players[2].y], dtype=numpy.float32),
@@ -78,10 +87,13 @@ class CustomGame(gymnasium.Env):
         }
     
     def step(self, action):
+        # Agent makes one input in the space at each step.
         self._execute_action(action)
 
+        # Game advances one step to evaluate that action.
         gamestate = self.console.step()
 
+        # If the game is not active, then set the Done value to True.
         if gamestate.menu_state not in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
             done = True
         else:
@@ -89,14 +101,17 @@ class CustomGame(gymnasium.Env):
 
         reward = self._calculate_reward(gamestate)
 
-        # Not sure what to do with this yet.
+        # We never got far enough into this approach to figure out what to do with this variable.
         info = {}
         
         # Update historical data.
         self.current_state = gamestate
+
         return self._get_obs(gamestate), reward, done, False, info
     
     def _execute_action(self, action):
+        # Selects the action from the array of possible actions based on the value chosen by the bot, then presses those buttons on the
+        # controller.
         selected_move = self.possible_moves[action]
         self.controller.simple_press(selected_move[1][0], selected_move[1][1], selected_move[0])
     
@@ -104,19 +119,20 @@ class CustomGame(gymnasium.Env):
         KNOCKOUT_REWARD = 1000
         OFF_STAGE_PENALTY = 10
         
-        # Reward if action has caused KO to opponent
+        # Reward if action has caused a KO to the opponent
         reward = KNOCKOUT_REWARD * (self.current_state.players[2].stock - gamestate.players[2].stock)
-        # Penalize if action has caused damage to us
+        # Penalize if action has caused a KO to the agent
         reward -= KNOCKOUT_REWARD * (self.current_state.players[1].stock - gamestate.players[1].stock)
 
-        # If we just KO'd, then the previous state will have higher percent than the current state (0%). Don't mess with that.
+        # If someone just KO'd, then their previous state will have higher percent than their current state (0%).
+        # If that's the case, don't reward or penalize based on that.
         if reward == 0:
             # Reward if action has caused damage to opponent
             reward += gamestate.players[2].percent - self.current_state.players[2].percent
-            # Penalize if action has caused damage to us
+            # Penalize if action has caused damage to agent
             reward -= gamestate.players[1].percent - self.current_state.players[1].percent
 
-        # Penalize if off the stage
+        # Penalize if agent is off the stage
         if gamestate.players[1].off_stage:
             reward -= OFF_STAGE_PENALTY
 
@@ -124,34 +140,43 @@ class CustomGame(gymnasium.Env):
 
     
     def reset(self, seed=None, options=None):
+        # There was some weird stuff going on with the emulator struggling to load, which caused the new instance to fail to connect.
+        # This sleep call function made it work, so that's why it's here.
         if self.console:
+            # A rewrite of the melee.Console.stop() function, which has a bug in it that keeps it from working.
             stop(self.console)
             time.sleep(1)
 
-        # More Windows-only code, swap out filepaths where needed.
+        # This code is only going to work on windows, but it'll get the default install directory for Slippi's Dolphin instance and set
+        # it as the path in our melee.Console object.
         homeDirectory = os.path.expanduser('~'+os.environ.get("USERNAME"))
         self.console = melee.Console(path=homeDirectory+"\\AppData\\Roaming\\Slippi Launcher\\netplay", slippi_address="127.0.0.1")
 
-        # Bot controller config, configure human controller within Dolphin under port 2.
+        # Agent controller config.
         self.controller = melee.Controller(console=self.console, port=1)
-        # Selects an in-game bot to play against.
+        # This controller will be used to select an in-game bot to train against.
         self.opponent_controller = melee.Controller(console=self.console, port=2)
 
-        # Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
+        # Start the emulator and connect to it. Put the game in the same directory as this file for this to work. The /b flag may or may not
+        # be helping with the failing to connect bug, but I don't want to try removing it to see if it's necessary or not so it's staying there.
         self.console.run("./ssb.iso", environment_vars={"/b": "true"})
+        # Again, helps with the failing to connect bug.
         time.sleep(3)
+        # Connects agent to the emulator.
         self.console.connect()
 
-        # Connect virtual controller.
+        # Connect virtual controllers to the emulator.
         self.controller.connect()
         self.opponent_controller.connect()
 
         while True:
+            # Advance one frame.
             self.current_state = self.console.step()
+            # We're now in-game, so finish our reset.
             if self.current_state.menu_state in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
                 return (self._get_obs(self.current_state), {})
             else:
-                # Navigate menus.
+                # Navigate the menus before we start our game.
                 melee.MenuHelper.choose_character(melee.Character.FOX,
                     self.current_state,
                     self.opponent_controller,

@@ -1,74 +1,33 @@
 # Goal is to create a program that can parse through a collection of .slp replay files and better organize
-# data to be used to feed into a behavioral cloning network (created using TensorFlow, since that doesn't seem
-# especially difficult to do and I have a lot of CUDA cores begging to be used here). We could probably read this
-# data directly but I'm imagining this will make training significantly faster, and at the very least it will make
-# it easier to write the NN because we'll have to do less processing there.
+# data to be used to feed into a behavioral cloning network (created using TensorFlow, since  things are going to take
+# a very long time if we don't make use of all the CUDA cores that I have sitting here). We could probably do these things
+# at the same time, but there's a *lot* of data and parsing it all once means that's less overhead for every epoch of
+# a network.
 #
 # Data set used comes from an outline of a similar project, which you can find here:
 # https://bycn.github.io/2022/08/19/project-nabla.html
 #
 # Includes 94484 high-level games. We only got through ~79% of them, or ~74240 of them.
-#
-# Notes:
-#    - Ensure everything is normalized to a numeric value between 0 and 1.
-#    - Ensure the network only knows about X or Y, L or R. If either, then 1, else 0.
-#         - Inconsistent between BUTTON_L/R and L/R_SHOULDER. Normalize all four to binary.
-#    - Ignore D-Pad input. It'd be funny if it started taunting, but we'll get better
-#      gameplay performance without it.
-#    - Ignore start button input. Not useful, no sense in training it.
-#    - Reduce stick precision to tenths place. Don't overtrain on precision here,
-#      that's probably enough precision to execute all the required moves.
-# For Y set:
-#    - int(A)
-#    - int(B)
-#    - int(X || Y)
-#    - int(BUTTON_L||BUTTON_R || L_SHOULDER>0 || R_SHOULDER>0)
-#    - int(Z)
-#    - Main Stick X, round to nearest tenth
-#    - Main Stick Y, round to nearest tenth
-#    - C X, round to nearest tenth
-#    - C Y, round to nearest tenth
-# For X set:
-#    - Stage
-#    - 2x, one for each character:
-#        - Character playing as (Know index of this for both characters)
-#        - Xpos (use position[0], not .x)
-#        - Ypos (Not sure what the range is, let's say divide by 500, should be fine?)
-#        - Percent (divide by 999)
-#        - Action (divide by 397, nothing should ever be 65535 and if it is, oh well)
-#        - Action frame (determined 250 is the most for this during the Gym solution, div by that)
-#        - Facing (wrap in int)
-#        - Jumps Left (divide by 2)
-#        - Invulnerable (wrap in int)
-#        - On Ground (wrap in int)
-#        - Off Stage (wrap in int)
-#        - Shield Strength/60, round to nearest tenth
-# Storage:
-#    - numpy will let us store bulk numeric data using np.save('file.npy', npyArrayName), but that's only
-#      numeric/value data. Will need to encode other stuff in probably filenames.
-#    - Store in output_path\\stage.value
-#    - Name files as f"{countervalue}-{port1.character.value}-{port2.character.value}.
-#    - Each array entry should contain three subarrays:
-#         - X set data
-#         - Y set data for port1
-#         - Y set data for port2
-#      in that order, such that we can recover it by reading filenames.
 
 import os
 import sys
 import melee
 import numpy
-# Thank you, ChatGPT, for these suggestions:
+# Thank you, ChatGPT, for this suggestion. I was just asking it how I would multithread this application (spoiler alert, that didn't
+# end up working), but it helpfully suggested this library. Were it not for this, I think I would've killed the process at hour 5.
 from tqdm import tqdm
 
+# This function probably could've been its own file, but it's here, so oh well. This actually formats the data for each frame.
 def store_data(gamestate: melee.GameState, controller_ports: list):
-    """This function probably should've been in its own file, but we've already started, so... oops."""
+    # This is the game state data.
     x = []
+    # This is the first player's controller data.
     y0 = []
+    # This is the second player's controller data.
     y1 = []
 
     # Generate X data
-    # Stage
+    # Stage. Notice that we forgot to normalize this value. That ends up getting done in the NN training file instead.
     x.append(gamestate.stage.value)
     # P1 XY (this is deprecated but I can't get position to work for some reason)
     x.append(gamestate.players[controller_ports[0]].x/500)
@@ -122,10 +81,12 @@ def store_data(gamestate: melee.GameState, controller_ports: list):
     # B button
     y0.append(int(controller_0.button[melee.Button.BUTTON_B]))
     y1.append(int(controller_1.button[melee.Button.BUTTON_B]))
-    # X || Y
+    # X || Y, since both X and Y can be used to jump.
     y0.append(int( controller_0.button[melee.Button.BUTTON_X] or controller_0.button[melee.Button.BUTTON_Y] ))
     y1.append(int( controller_1.button[melee.Button.BUTTON_X] or controller_1.button[melee.Button.BUTTON_Y] ))
-    # L||R || L_SH||R_SH
+    # L||R || L_SH||R_SH. Both of these can be used to shield, and it seems like we can probably ignore the continuous
+    # nature of the shield button since this rarely comes into play in an actual game. We'll reduce this to a 0/1
+    # binary value.
     y0.append(int( controller_0.button[melee.Button.BUTTON_L] or controller_0.button[melee.Button.BUTTON_R] or
                   (controller_0.l_shoulder > 0) or (controller_0.r_shoulder > 0) ))
     y1.append(int( controller_1.button[melee.Button.BUTTON_L] or controller_1.button[melee.Button.BUTTON_R] or
@@ -133,16 +94,16 @@ def store_data(gamestate: melee.GameState, controller_ports: list):
     # Z button
     y0.append(int(controller_0.button[melee.Button.BUTTON_Z]))
     y1.append(int(controller_1.button[melee.Button.BUTTON_Z]))
-    # Main Stick X
+    # Main Stick X value, reduced to ten possible states to simplify things.
     y0.append(round(controller_0.main_stick[0], 1))
     y1.append(round(controller_1.main_stick[0], 1))
-    # Main Stick Y
+    # Main Stick Y value, reduced to ten possible states to simplify things.
     y0.append(round(controller_0.main_stick[1], 1))
     y1.append(round(controller_1.main_stick[1], 1))
-    # C X
+    # C stick X value
     y0.append(round(controller_0.c_stick[0], 1))
     y1.append(round(controller_1.c_stick[0], 1))
-    # C Y
+    # C stick Y value
     y0.append(round(controller_0.c_stick[1], 1))
     y1.append(round(controller_1.c_stick[1], 1))
 
@@ -150,62 +111,69 @@ def store_data(gamestate: melee.GameState, controller_ports: list):
 
 input_path = "D:\\smashdataset\\smashdataset\\"#
 output_path = "D:\\smashdataset\\parseddata\\"
-# Unimportant for data, but we can't have identically named files.
+# Unimportant for data, but we can't have identically named files. This will ensure unique filenames.
 replay_num = 0
 
 for replay in tqdm(os.listdir(input_path)):
     # Increment filenum
     replay_num += 1
-    if replay_num < 42017:
+    # There were some corrupt replay files in the set. When the program crashed here at replay 42016, this line let us pick up
+    # right where we left off.
+    if replay_num < 42017: 
         continue
     # Load the file in.
     console = melee.Console(path=input_path+replay, system="file", allow_old_version=True)
     console.connect()
 
     gamestate = console.step()
-    # Ensure the game is valid, I do *not* want this crashing on me.
+    # Ensure the game is valid to minimize crashes.
     if gamestate is None:
         continue
-    # Ensure the data is valid as well.
+    # Ensure the data is valid as well. 1, 3, or 4 player games are meaningless if they're in there.
     if len(gamestate.players) != 2:
         continue
 
-    # Game data is good, now figure out player port numbers to read Y state data from.
+    # Since we now know the game data is good, this gets the controller port numbers to read controller state data from.
+    # Players in real games could be connected to any controller port, after all.
     controller_ports = list(gamestate.players.keys())
 
-    # This is going to take a lot of time to run through, so we're only going to train two characters.
+    # We knew this was going to take a very long time to run through, so we simplified our methods to read data from only two characters.
+    # Initially, we thought we might train a network on both of these characters, but when it became apparent just how many more games played
+    # Fox than played Jigglypuff, we stuck with just the one.
     p1 = gamestate.players[controller_ports[0]].character
     p2 = gamestate.players[controller_ports[1]].character
     if p1 != melee.Character.FOX and p2 != melee.Character.FOX and p1 != melee.Character.JIGGLYPUFF and p2 != melee.Character.JIGGLYPUFF:
         continue
 
-    # We have data to assign a filename with now, so do that. When we get to actually saving these, we'll tack on an X/Y1/Y2
+    # We have data to assign a filename with, so we do that. Files are named with the format "ID#-P1 character-P2 character-data set.npy"
     filename = f"{replay_num}-{gamestate.players[controller_ports[0]].character.value}-{gamestate.players[controller_ports[1]].character.value}-"
-    # For directory, the stagenum
+    # We thought maybe it would be worth training on only a single stage, but by the time we got to writing the network it became apparent that the more
+    # data we had, the better things would probably turn out. This step ended up being redundant, then.
     stagename = gamestate.stage.value
 
-    # Arrays in which to store the data:
+    # Arrays in which to store each frame for a given replay.
     x_set = []
     y0_set = []
     y1_set = []
     
     while gamestate is not None:
 
-        # Store the data:
+        # Store the data for the current frame.
         x_data, y0_data, y1_data = store_data(gamestate, controller_ports)
-        # Append to global set:
+        # Append to the game set.
         x_set.append(x_data)
         y0_set.append(y0_data)
         y1_set.append(y1_data)
 
-        # Increment the gamestate
+        # Proceed to the next frame.
         gamestate = console.step()
     
-    # Save the data:
+    # Store the data as a numpy array, which will allow for easy reading later on.
     x_arr = numpy.array(x_set)
     y0_arr = numpy.array(y0_set)
     y1_arr = numpy.array(y1_set)
-
+    
+    # Save those arrays.
     numpy.save(f"{output_path}{stagename}\\{filename}x", x_arr)
     numpy.save(f"{output_path}{stagename}\\{filename}y0", y0_arr)
     numpy.save(f"{output_path}{stagename}\\{filename}y1", y1_arr)
