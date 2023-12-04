@@ -15,6 +15,9 @@ can change the filename if you'd like by changing the filename at line 32 of BCB
 on Windows, these scripts will look for the Slippi Dolphin emulator in the default install directory, but if you're not, you'll
 need to change the path on lines 152-153 of SmashGym.py or lines 12-13 of BCBot.py.
 
+To run the MeleeBot.py script, which represents the basic decision tree agent, modify line 20 to point to your Slippi Dolphin
+install, and modify line 38 to point to your image of Melee.
+
 To run the BCNetDataGenerator.py script, change the paths on lines 112 and 113 to your desired input/output paths. input_path
 is where your replays should be located, and output_path is where you'd like the generated arrays to be stored. Lines 122-123
 were used to overcome a crash due to a corrupted replay file in our dataset, so unless you want to start at the 42017th replay,
