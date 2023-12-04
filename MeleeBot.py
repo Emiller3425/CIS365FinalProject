@@ -10,31 +10,26 @@ from pathlib import Path
 from Stop import stop
 
 
-# Assuming you're running this under Windows. Didn't want to have a CLI argument every time.
+# Hard coded path to Slippi Dolphin
 home_directory = "/Users/emiller3425"
 slippi_path = "Library/Application Support/Slippi Launcher/netplay"
-
 full_path = Path(os.path.expanduser(os.path.join(home_directory, slippi_path)))
-print(full_path)
+
 # Emulator config.
 console = melee.Console(path=str(full_path.resolve()), slippi_address="127.0.0.1")
 # Bot controller config.
 controller = melee.Controller(console=console, port=1)
-# There are bugs that may prevent this from selecting a CPU player. I have figured these out but I
-# can't push them rn. Sorry.
+# set opponent controller
 opponentController = melee.Controller(console=console, port=2)
 
-# Theoretically, you should just be able to call console.stop() to kill the Dolphin instance.
-# This doesn't seem to work. The implementation below definitely does but I'm leaving it commented
-# out because it's Windows-specific code.
+# Kill dolphin instance on windows
 def close(sig, frame):
     stop(console)
     sys.exit(0)
 
 signal.signal(signal.SIGINT, close)
 
-# Start the emulator and connect to it. Put the game in the same directory as this file for this to work.
-# Rename the iso to match. If it's not a .nkit I don't think it really matters, just rename it anyways.
+# Start the emulator and connect to it.
 console.run(iso_path="/Users/emiller3425/cis365/CIS365FinalProject/ssb.iso", exe_name="Slippi Dolphin")
 console.connect()
 
@@ -46,7 +41,7 @@ while True:
     # Get next frame.
     gamestate = console.step()
     if gamestate.menu_state in [melee.Menu.IN_GAME, melee.Menu.SUDDEN_DEATH]:
-        # Game is active, logic goes here.
+        # Game is active
 
         #If agent is off stage
         if gamestate.player[1].off_stage == 1:
@@ -100,7 +95,7 @@ while True:
                 controller.release_button(melee.Button.BUTTON_X)
 
     else:
-        # Navigate menus.
+        # Navigate menus , select character and map.
         melee.MenuHelper.choose_character(melee.Character.FOX,
                                           gamestate,
                                           opponentController,
